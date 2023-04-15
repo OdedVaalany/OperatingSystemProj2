@@ -1,0 +1,67 @@
+oded_vaalany, eranston Oded Vaalany (208230474), Eran Ston (206704512) EX: 2
+
+FILES:
+
+REMARKS:
+
+AMSWERS:
+
+1.a: Describe what the functions sigsetjmp and siglongjmp do?
+
+sigsetjmp - saves the current location, CPU state and signal mask.\
+siglongjmp - goes to the saved location' restoing the state and the signal mask
+
+1.b: Describe how sigsetjmp and siglongjmp affect masking?
+
+sigsetjmp saves the current mask and whan siglongjmp called he modify the
+signal mask to the same signal as the saved state of the sigsetjmp he restores
+
+2: Describe one general use of user-level threads and explain why user-level
+threads are a reasonable choice for your example?
+
+When you have a few threads of calculations only, without any requests from the
+os. such as two diffrents calculations in the same program. \
+so the user level is preferd because: Threads switching in user level is cheaper,
+and scheduling can be application-specific so the developer has more control over
+what calculation is more importent at each time. this allow the programer to fit
+his programs batter to the hardware.
+
+3: Google’s Chrome browser creates a new process for each tab. What are the
+advantages and disadvantages of creating the new process (instead of creating a
+kernel-level thread)?
+
+disadvantages:
+
+-   processes has more overhead than kernel-level thread
+-   its more time the kill/create a proccesses than a kernel-level threads
+
+advantages:
+
+-   protected from each other require os to communicate
+-   process has the abilty to scheduled by theirselves and its allow to the
+    tabs stop their actions while not in use
+-   errors are contained within the process (tabs) and not effect the other
+    processes (tabs)
+
+4.a: Open an application (for example, “Shotwell” on one of the CS computers).
+Use the “ps -A” command to extract the application’s pid (process ID).
+
+#TODO
+
+5: What is the difference between ‘real’ and ‘virtual’ time? Give one example
+of using each?
+
+real time is the time that took to run the process in the physical world
+including all the breaks, and virtual time is the time the proccess think he
+ran. for example we have a proccess who run 3 times on the cpu in one minute
+each time was 10 seconds. so in the virtual time the process ran 30 seconds
+while in the real time (world) the process ran 60 seconds from start till the
+end
+
+real time example in the a factory we want to mesure the time took to run the
+process, we will determine the time in real time, because its importent that
+each proccess fit the real world sceduale
+
+virtual time example, when the os want to manage its RAM sapce it swaps the
+data of each procces between the RAM to the Hard Disk by pay attantion to the
+virtual time of the procces and not the real time of the process
