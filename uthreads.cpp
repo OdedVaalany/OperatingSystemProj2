@@ -2,18 +2,21 @@
 #include <stdlib.h>;
 #include <stdio.h>;
 #include <queue>;
-#include <sys/time.h>
+#include <sys/time.h>;
+#include <setjmp.h>;
 
 enum ThreadState {RUNNING,BLOCKED,READY};
+
+typedef unsigned long address_t;
+#define JB_SP 6
+#define JB_PC 7
 
 struct ThreadCard
 {
     int id;
     ThreadState state;
     int quantum;
-    char* sp;
-    size_t pc;
-    thread_entry_point entry_point;
+    sigjmp_buf _sigjmp_buf;
 };
 
 
@@ -24,6 +27,30 @@ static std::queue<ThreadCard*> ready_threads;
 static std::queue<ThreadCard*> blocked_threads;
 static std::priority_queue<int,std::vector<int>,std::greater<int>> empty_ids;
 static std::unordered_map<int,ThreadCard*> threads;
+
+/* A translation is required when using an address of a variable.
+   Use this as a black box in your code. */
+address_t translate_address(address_t addr)
+{
+    address_t ret;
+    asm volatile("xor    %%fs:0x30,%0\n"
+        "rol    $0x11,%0\n"
+                 : "=g" (ret)
+                 : "0" (addr));
+    return ret;
+}
+
+void setup_thread(int tid, char *stack, thread_entry_point entry_point){
+    // initializes env[tid] to use the right stack, and to run from the function 'entry_point', when we'll use
+    // siglongjmp to jump into the thread.
+    address_t sp = (address_t) stack + STACK_SIZE - sizeof(address_t);
+    address_t pc = (address_t) entry_point;
+    threads[tid] = (ThreadCard*) malloc(sizeof(ThreadCard));
+    sigsetjmp(threads[tid]->_sigjmp_buf, 1);
+    (threads[tid]->_sigjmp_buf)[JB_SP] = translate_address(sp);
+    (threads[tid]->_sigjmp_buf)[JB_PC] = translate_address(pc);
+    //sigemptyset(&threads[tid]->_sigjmp_buf->__saved_mask);
+}
 
 void remove_from_ready_queue(int tid){
     ThreadCard* temp;
@@ -89,7 +116,6 @@ int uthread_spawn(thread_entry_point entry_point){
         return -1;
     }
     temp->pc = 0;
-    temp->entry_point = entry_point;
     temp->quantum = 0;
     temp->id = id;
     temp->state = READY;
@@ -175,5 +201,9 @@ int uthread_get_total_quantums(){
 
 int uthread_get_quantums(int tid){
     return threads[tid]->quantum;
+}
+
+int uthread_sleep(int num_quantums){
+
 }
 
