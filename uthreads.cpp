@@ -6,9 +6,9 @@
 static std::unordered_map<int,TCB> threads_map = std::unordered_map<int,TCB>(MAX_THREAD_NUM);
 static std::priority_queue<int,std::vector<int>,std::greater<int>> empty_ids;
 static std::queue<int> ready_threads;
-static std::unordered_set<int> blocked_threads;
+static std::unordered_set<int> blocked_threads = std::unordered_set<int>();
 static int running_thread;
-static struct itimerval timer;
+static struct itimerval timer,remaining_time,zero_time ={0};
 static struct sigaction sa = {0};
 static unsigned long total_quantoms =0;
 
@@ -18,6 +18,85 @@ void filter_queue(std::queue<int>& qu,int tid){
             qu.push(qu.front());
         }
         qu.pop();
+    }
+}
+
+void block_signal(){
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGVTALRM);
+    sigprocmask(SIG_BLOCK, &mask, NULL);
+}
+
+void unblock_signal(){
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGVTALRM);
+    sigprocmask(SIG_UNBLOCK, &mask, NULL);
+}
+
+
+void pause_timer(){
+    if(getitimer(ITIMER_VIRTUAL,&remaining_time)){
+    if(setitimer(ITIMER_VIRTUAL,&zero_time,NULL)){
+        std::cout << "set timer error";
+    }
+    }
+}
+
+void resume_timer(){
+    if(setitimer(ITIMER_VIRTUAL,&remaining_time,NULL)){
+        std::cout << "set timer error";
+    }
+}
+
+void reset_timer(){
+    if(setitimer(ITIMER_VIRTUAL,&timer,NULL)){
+        std::cout << "set timer error";
+    }
+}
+
+void print_states(){
+    std::cout << "================\n"; 
+    for(int i=0 ;i<3 ; i++){
+        std::cout << "thread number\t" << i << "\nthread state\t" << threads_map[i].state << "\nthread blocked quantums count\t" << threads_map[i].blocked_quantums_count << std::endl;
+    }
+}
+
+void replace_current_thread(ThreadState state){
+    if(state != RUNNING){
+        if(sigsetjmp(threads_map[running_thread]._sigjmp_buf, 1) == 0){
+        total_quantoms++;
+        if(state == READY){
+            ready_threads.push(running_thread);
+            threads_map[running_thread].state = READY;
+        }
+        else if(state == BLOCKED){
+            blocked_threads.insert(running_thread);
+            threads_map[running_thread].state = BLOCKED;
+        }
+        running_thread = ready_threads.front();
+        ready_threads.pop();
+        threads_map[running_thread].state = RUNNING;
+        threads_map[running_thread].quantums_count++;
+
+        for(int tid : blocked_threads){
+            if(tid > -1 && tid < MAX_THREAD_NUM && threads_map[tid].blocked_quantums_count > -1){
+                if(threads_map[tid].blocked_quantums_count == 0){
+                    uthread_resume(tid);
+                }
+                else{
+                    threads_map[tid].blocked_quantums_count--;
+                }
+            }
+        }
+
+        //std::cout << "current running thread number " << running_thread << std::endl;
+        //print_states();
+        reset_timer();
+        unblock_signal();
+        siglongjmp(threads_map[running_thread]._sigjmp_buf, 1);
+        }
     }
 }
 
@@ -35,51 +114,33 @@ address_t translate_address(address_t addr)
                  : "0" (addr));
     return ret;
 }
+
 void time_hanlder(int sig){
-    if(!ready_threads.empty())
-    {
-            if(sigsetjmp(threads_map[running_thread]._sigjmp_buf, 1) == 0){
-            total_quantoms++;
-            ready_threads.push(running_thread);
-            threads_map[running_thread].state = READY;
-            running_thread = ready_threads.front();
-            threads_map[running_thread].state = RUNNING;
-            threads_map[running_thread].quantums_count++;
-            ready_threads.pop();
-
-            for(const int tid : blocked_threads){
-                if(threads_map[tid].blocked_quantums_count > -1){
-                    if(threads_map[tid].blocked_quantums_count == 0){
-                        std::cout << tid << std::endl;
-                        uthread_resume(tid);
-                    }
-                    else{
-                        threads_map[tid].blocked_quantums_count--;    
-                        std::cout << "thread " << tid << " sleep more " << threads_map[tid].blocked_quantums_count << std::endl;
-                    }
-                }
-            }
-
-            siglongjmp(threads_map[running_thread]._sigjmp_buf, 1);
-            }
-    }
+    block_signal();
+    replace_current_thread(READY);
 }
 
 void busy_main(){
     while(true){
-        //std::cout << "hello from main" << std::endl;
+        //std::cout << "hello from main" << std::endl;  
     }
 }
 
 void func1(){
     while(true){
-        //std::cout << "hello from 1" << std::endl;
+        std::cout << "number of thread: " << 1 << std::endl;
+        std::cout << "number of quantums: " << threads_map[1].quantums_count << std::endl;
+        std::cout << "total quantom: " << total_quantoms << std::endl;
+        uthread_sleep(10);
     }
 }
+
 void func2(){
     while(true){
-    std::cout << "hello I am func 2 now I am going to sleep" << std::endl;
-    uthread_sleep(10);
+        std::cout << "number of thread: " << 2 << std::endl;
+        std::cout << "number of quantums: " << threads_map[2].quantums_count << std::endl;
+        std::cout << "total quantom: " << total_quantoms << std::endl;
+        uthread_sleep(10);
     }
 }
 
@@ -106,8 +167,8 @@ int uthread_init(int quantum_usecs){
     //setting the timer 
     timer.it_value.tv_sec = 0;
     timer.it_value.tv_usec = quantum_usecs;
-    timer.it_interval.tv_sec = 0;
-    timer.it_interval.tv_usec = quantum_usecs;
+    // timer.it_interval.tv_sec = 0;
+    // timer.it_interval.tv_usec = quantum_usecs;
 
 
     if(setitimer(ITIMER_VIRTUAL,&timer,NULL)){
@@ -121,8 +182,10 @@ int uthread_init(int quantum_usecs){
 }
 
 int uthread_spawn(thread_entry_point entry_point){
+    block_signal();
     if(empty_ids.empty()){
         std::cerr << "thread library error: too much threads active" << std::endl;
+        
         return -1;
     }
     int tid = empty_ids.top();
@@ -143,10 +206,12 @@ int uthread_spawn(thread_entry_point entry_point){
     threads_map[tid].state = READY;
     ready_threads.push(tid);
     empty_ids.pop();
+    unblock_signal();
     return 0;
 }
 
 int uthread_terminate(int tid){
+    block_signal();
     if(tid == 0){
         for(const std::pair<int,TCB> item : threads_map){
             if(item.second.sp != NULL){
@@ -157,15 +222,30 @@ int uthread_terminate(int tid){
     }
     if(tid >= MAX_THREAD_NUM){
         std::cerr << "thread library error: the tid not fit the MAX_THREAD_NUM" << std::endl;
+        unblock_signal();
         return -1;
     }
     if(threads_map[tid].sp == NULL){
         std::cerr << "thread library error: thread not active" << std::endl;
+        unblock_signal();
         return -1;
     }
     free(threads_map[tid].sp);
     threads_map[tid].sp = NULL;
     empty_ids.push(tid);
+    if(threads_map[tid].state == RUNNING){
+        threads_map[tid].state = DELETED;
+        replace_current_thread(DELETED);
+    }
+    else if(threads_map[tid].state == READY){
+        threads_map[tid].state = DELETED;
+        filter_queue(ready_threads,tid);
+    }
+    else if(threads_map[tid].state == BLOCKED){
+        threads_map[tid].state = DELETED;
+        blocked_threads.erase(tid);
+    }
+    unblock_signal();
     return 0;
 }
 
@@ -178,31 +258,18 @@ int _uthread_block(int tid,int quantums){
         std::cerr << "thread library error: the tid not fit the MAX_THREAD_NUM"<< std::endl;
         return -1;
     }
-    if(running_thread == tid){
-        if(sigsetjmp(threads_map[tid]._sigjmp_buf, 1) == 0){
-            total_quantoms++;
-            blocked_threads.insert(running_thread);
-            threads_map[running_thread].state = BLOCKED;
-            threads_map[running_thread].blocked_quantums_count = quantums;
-            running_thread = ready_threads.front();
-            threads_map[running_thread].state = RUNNING;
-            threads_map[running_thread].quantums_count++;
-            ready_threads.pop();
-            siglongjmp(threads_map[running_thread]._sigjmp_buf, 1);
-            return 0;
-        }
-        else{
-            std::cerr << "can't switch threads" << std::endl;
-            return -1;
-        }
-    }
     if(threads_map[tid].sp == NULL){
         std::cerr << "thread library error: thread not active" << std::endl;
         return -1;
     }
+    threads_map[tid].blocked_quantums_count = quantums;
+    if(running_thread == tid){
+        replace_current_thread(BLOCKED);
+        return 0;
+        
+    }
     if(threads_map[tid].state == READY){
         threads_map[tid].state = BLOCKED;
-        threads_map[tid].blocked_quantums_count = quantums;
         filter_queue(ready_threads,tid);
         blocked_threads.insert(tid);
     }
@@ -211,36 +278,48 @@ int _uthread_block(int tid,int quantums){
 
 
 int uthread_block(int tid){
-    return _uthread_block(tid,-1);
+    block_signal();
+    int ret_val = _uthread_block(tid,-1);
+    unblock_signal();
+    return ret_val;
 }
 
 int uthread_resume(int tid){
+    block_signal();
     if(tid == 0){
         std::cerr << "thread library error: can't block the main thread" << std::endl;
+        unblock_signal();
         return -1;
     }
-    if(tid >= MAX_THREAD_NUM){
-        std::cerr << "thread library error: the tid not fit the MAX_THREAD_NUM " << tid << std::endl;
+    if(tid >= MAX_THREAD_NUM || tid < -1){
+        std::cerr << "thread library error: the tid not fit the MAX_THREAD_NUM" << tid << std::endl;
+        unblock_signal();
         return -1;
     }
     if(threads_map[tid].sp == NULL){
         std::cerr << "thread library error: thread not active " << tid << std::endl;
+        unblock_signal();
         return -1;
     }
     if(threads_map[tid].state == BLOCKED && threads_map[tid].blocked_quantums_count <= 0){
-        threads_map[tid].state == READY;
+        threads_map[tid].state = READY;
         ready_threads.push(tid);
         blocked_threads.erase(tid);
     }
+    unblock_signal();
     return 0;
 }
 
 int uthread_sleep(int num_quantums){
+    block_signal();
     if(running_thread == 0){
         std::cerr << "thread library error: main thread cant call sleep" << std::endl;
+        unblock_signal();
         return -1;
     }
-    return _uthread_block(running_thread,num_quantums);
+    int ret_val = _uthread_block(running_thread,num_quantums);
+    unblock_signal();
+    return ret_val;
 }
 
 int uthread_get_tid(){
@@ -248,19 +327,27 @@ int uthread_get_tid(){
 }
 
 int uthread_get_total_quantums(){
-    return total_quantoms;
+    block_signal();
+    int ret_val = total_quantoms;
+    unblock_signal();
+    return ret_val;
 }
 
 int uthread_get_quantums(int tid){
+    block_signal();
     if(tid >= MAX_THREAD_NUM){
         std::cerr << "thread library error: the tid not fit the MAX_THREAD_NUM" << std::endl;
+        unblock_signal();
         return -1;
     }
     if(threads_map[tid].sp == NULL && tid != 0){
         std::cerr << "thread library error: thread not active" << std::endl;
+        unblock_signal();
         return -1;
     }
-    return threads_map[tid].quantums_count;
+    int ret_val = threads_map[tid].quantums_count;
+    unblock_signal();
+    return ret_val;
 }
 
 int main(){

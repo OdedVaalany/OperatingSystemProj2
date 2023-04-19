@@ -6,7 +6,7 @@
 #define JB_PC 7
 
 
-enum ThreadState {RUNNING,BLOCKED,READY};
+enum ThreadState {RUNNING,BLOCKED,READY,DELETED};
 typedef unsigned long address_t;
 
 struct TCB
