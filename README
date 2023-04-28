@@ -46,6 +46,7 @@ advantages:
 4.a: Open an application (for example, “Shotwell” on one of the CS computers).
 Use the “ps -A” command to extract the application’s pid (process ID).
 
+the keyboard generates an interrupt signal when we enter the kill command in the shell. The shell sends a signal to the operating system to kill the Shotwell process with the specified PID. The operating system sends a SIGTERM signal to the Shotwell process, and if necessary, a SIGKILL signal to forcefully terminate it. The Shotwell process receives these signals and handles them accordingly.
 #TODO
 
 5: What is the difference between ‘real’ and ‘virtual’ time? Give one example

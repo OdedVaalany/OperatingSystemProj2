@@ -1,6 +1,22 @@
 #include "uthreads.h"
 
 
+#define JB_SP 6
+#define JB_PC 7
+
+
+enum ThreadState {RUNNING,BLOCKED,READY,DELETED};
+typedef unsigned long address_t;
+
+struct TCB
+{
+    int tid;
+    ThreadState state;
+    unsigned int quantums_count;
+    int blocked_quantums_count; //-1 is infinte other automaticly released
+    sigjmp_buf _sigjmp_buf;
+    char* sp;
+};
 
 
 static std::unordered_map<int,TCB> threads_map = std::unordered_map<int,TCB>(MAX_THREAD_NUM);
@@ -8,12 +24,18 @@ static std::priority_queue<int,std::vector<int>,std::greater<int>> empty_ids;
 static std::queue<int> ready_threads;
 static std::unordered_set<int> blocked_threads = std::unordered_set<int>();
 static int running_thread;
-static struct itimerval timer,remaining_time,zero_time ={0};
+static struct itimerval timer;
 static struct sigaction sa = {0};
 static unsigned long total_quantoms =0;
 
+
+/**
+ * @brief filter a given qu from a given item
+ * @param qu the qu to filter
+ * @param tid the tid to filter from the qu
+*/
 void filter_queue(std::queue<int>& qu,int tid){
-    for(int i = 0; i < qu.size();i++){
+    for(size_t i = 0; i < qu.size();i++){
         if(qu.front() != tid){
             qu.push(qu.front());
         }
@@ -21,6 +43,9 @@ void filter_queue(std::queue<int>& qu,int tid){
     }
 }
 
+/**
+ * @brief block the clock to call the action when time is end
+*/
 void block_signal(){
     sigset_t mask;
     sigemptyset(&mask);
@@ -28,6 +53,9 @@ void block_signal(){
     sigprocmask(SIG_BLOCK, &mask, NULL);
 }
 
+/**
+ * @brief resume the action of the clock when time is end
+*/
 void unblock_signal(){
     sigset_t mask;
     sigemptyset(&mask);
@@ -36,33 +64,21 @@ void unblock_signal(){
 }
 
 
-void pause_timer(){
-    if(getitimer(ITIMER_VIRTUAL,&remaining_time)){
-    if(setitimer(ITIMER_VIRTUAL,&zero_time,NULL)){
-        std::cout << "set timer error";
-    }
-    }
-}
 
-void resume_timer(){
-    if(setitimer(ITIMER_VIRTUAL,&remaining_time,NULL)){
-        std::cout << "set timer error";
-    }
-}
-
+/**
+ * @brief reset the timer
+*/
 void reset_timer(){
     if(setitimer(ITIMER_VIRTUAL,&timer,NULL)){
         std::cout << "set timer error";
     }
 }
 
-void print_states(){
-    std::cout << "================\n"; 
-    for(int i=0 ;i<3 ; i++){
-        std::cout << "thread number\t" << i << "\nthread state\t" << threads_map[i].state << "\nthread blocked quantums count\t" << threads_map[i].blocked_quantums_count << std::endl;
-    }
-}
 
+/**
+ * @brief the function replace the current thread
+ * @param state the thread state to move the running thread into 
+*/
 void replace_current_thread(ThreadState state){
     if(state != RUNNING){
         if(sigsetjmp(threads_map[running_thread]._sigjmp_buf, 1) == 0){
@@ -90,9 +106,6 @@ void replace_current_thread(ThreadState state){
                 }
             }
         }
-
-        //std::cout << "current running thread number " << running_thread << std::endl;
-        //print_states();
         reset_timer();
         unblock_signal();
         siglongjmp(threads_map[running_thread]._sigjmp_buf, 1);
@@ -115,32 +128,19 @@ address_t translate_address(address_t addr)
     return ret;
 }
 
+/**
+ * @brief this is the function that called every time the clock stops
+*/
 void time_hanlder(int sig){
     block_signal();
     replace_current_thread(READY);
 }
 
+/**
+ * @brief the main thread function 
+*/
 void busy_main(){
     while(true){
-        //std::cout << "hello from main" << std::endl;  
-    }
-}
-
-void func1(){
-    while(true){
-        std::cout << "number of thread: " << 1 << std::endl;
-        std::cout << "number of quantums: " << threads_map[1].quantums_count << std::endl;
-        std::cout << "total quantom: " << total_quantoms << std::endl;
-        uthread_sleep(10);
-    }
-}
-
-void func2(){
-    while(true){
-        std::cout << "number of thread: " << 2 << std::endl;
-        std::cout << "number of quantums: " << threads_map[2].quantums_count << std::endl;
-        std::cout << "total quantom: " << total_quantoms << std::endl;
-        uthread_sleep(10);
     }
 }
 
@@ -157,9 +157,6 @@ int uthread_init(int quantum_usecs){
     for(int i=1;i< MAX_THREAD_NUM; i++){
         empty_ids.push(i);
     }
-
-    uthread_spawn(&func1);
-    uthread_spawn(&func2);
     
     sa.sa_handler = &time_hanlder;
     if(sigaction(SIGVTALRM,&sa,NULL)<0) std::cout << "sigaction error";
@@ -167,8 +164,6 @@ int uthread_init(int quantum_usecs){
     //setting the timer 
     timer.it_value.tv_sec = 0;
     timer.it_value.tv_usec = quantum_usecs;
-    // timer.it_interval.tv_sec = 0;
-    // timer.it_interval.tv_usec = quantum_usecs;
 
 
     if(setitimer(ITIMER_VIRTUAL,&timer,NULL)){
@@ -207,7 +202,7 @@ int uthread_spawn(thread_entry_point entry_point){
     ready_threads.push(tid);
     empty_ids.pop();
     unblock_signal();
-    return 0;
+    return tid;
 }
 
 int uthread_terminate(int tid){
@@ -348,11 +343,6 @@ int uthread_get_quantums(int tid){
     int ret_val = threads_map[tid].quantums_count;
     unblock_signal();
     return ret_val;
-}
-
-int main(){
-    uthread_init(10000);
-    return EXIT_SUCCESS;
 }
 
 

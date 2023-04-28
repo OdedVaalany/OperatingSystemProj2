@@ -7,7 +7,6 @@
 #ifndef _UTHREADS_H
 #define _UTHREADS_H
 
-#include "uthreads_utils.cpp"
 #include <stdlib.h>
 #include <stdio.h>
 #include <queue>
