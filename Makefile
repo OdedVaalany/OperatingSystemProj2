@@ -2,7 +2,7 @@ CC=g++
 CXX=g++
 RANLIB=ranlib
 
-LIBSRC=uthreads.cpp
+LIBSRC=uthreads.cpp uthreads.h
 LIBOBJ=$(LIBSRC:.cpp=.o)
 
 INCS=-I
