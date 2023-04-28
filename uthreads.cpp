@@ -346,6 +346,10 @@ int uthread_get_quantums(int tid){
 }
 
 
+int main(){
+    return EXIT_SUCCESS;
+}
+
 
 
 
