@@ -4,7 +4,6 @@
 #define JB_SP 6
 #define JB_PC 7
 
-
 enum ThreadState {RUNNING,BLOCKED,READY,DELETED};
 typedef unsigned long address_t;
 
@@ -345,11 +344,9 @@ int uthread_get_quantums(int tid){
     return ret_val;
 }
 
-
 int main(){
     return EXIT_SUCCESS;
 }
-
 
 
 
